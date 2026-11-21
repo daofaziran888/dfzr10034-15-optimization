@@ -92,16 +92,13 @@ class AssetRegistryService(BaseModuleService):
         ]
 
     def get_asset_tags(self, asset_id: int) -> list[dict[str, Any]]:
-        """查询资产关联的业务标签（Pipeline 9）。"""
+        """查询资产关联的业务标签（Pipeline 9，按覆盖去重）。"""
+        from app.services.tag_registry import TagRegistryService
+
         asset = self.get_entry(asset_id)
         if not asset:
             return []
-        asset_code = asset.get("资产编号", "")
-        results = []
-        for row in store.rows("tag_registry"):
-            if row.get("关联资产数", "") == asset_code:
-                results.append(row)
-        return results
+        return TagRegistryService().get_tags_by_asset(asset.get("资产编号", ""))
 
     def get_asset_classifications(self, asset_id: int) -> list[dict[str, Any]]:
         """查询资产关联的分级标签。"""

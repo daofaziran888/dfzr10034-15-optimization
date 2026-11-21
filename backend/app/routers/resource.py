@@ -8,7 +8,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.schemas import ActionPayload, ActionResult, EntryPayload, PageResult
+from app.schemas import (
+    ActionPayload, ActionResult, BatchAssociationPayload, EntryPayload,
+    MergeTagsPayload, PageResult, RevokeAssociationPayload,
+)
 from app.services import service_for
 
 router = APIRouter(prefix="/api", tags=["业务资源"])
@@ -96,3 +99,112 @@ def run_action(module: str, entry_id: int, payload: ActionPayload) -> ActionResu
     service = require_service(module)
     entry, message = service.run_action(entry_id, payload.action.strip())
     return ActionResult(ok=entry is not None, message=message, entry=entry)
+
+
+# ── 标签覆盖链路专用接口 ────────────────────────────────────
+# 固定路径必须注册在 /{module}/{entry_id} 之前，避免被动态路径抢先匹配。
+
+def require_tag_service():
+    from app.services.tag_registry import TagRegistryService
+
+    service = service_for("tag_registry")
+    if not isinstance(service, TagRegistryService):
+        service = TagRegistryService()
+    return service
+
+
+@router.post("/tag_registry/batch-associate", response_model=ActionResult)
+def batch_associate_tags(payload: BatchAssociationPayload) -> ActionResult:
+    """批量提交标签关联，逐条按资产身份归并覆盖集合。"""
+    service = require_tag_service()
+    result = service.batch_associate(
+        payload.tag_id if not payload.records else None,
+        payload.assets,
+        records=payload.records or None,
+        source=payload.source,
+        credential=payload.credential,
+        confirm=payload.confirm,
+    )
+    if not result.get("ok"):
+        message = next(
+            (item.get("error") for item in result.get("results", []) if item.get("error")),
+            "批量关联未通过",
+        )
+        return ActionResult(ok=False, message=message, result=result)
+    return ActionResult(
+        ok=True,
+        message=(
+            f"批量关联完成：提交{result['submitted']}条，"
+            f"新增{result['created']}条，重复{result['duplicates']}条，"
+            f"覆盖{result['coverage_count']}张表"
+        ),
+        result=result,
+    )
+
+
+@router.post("/tag_registry/merge", response_model=ActionResult)
+def merge_tags(payload: MergeTagsPayload) -> ActionResult:
+    """合并两个标签，覆盖按资产身份取并集。"""
+    service = require_tag_service()
+    result = service.merge_tags(payload.source_id, payload.target_id)
+    if not result.get("ok"):
+        return ActionResult(ok=False, message=result.get("error", "标签合并失败"), result=result)
+    return ActionResult(
+        ok=True,
+        message=(
+            f"标签已合并：目标标签覆盖{result['coverage_count']}张表"
+            f"（迁移凭据{result['moved_evidence']}条）"
+        ),
+        result=result,
+    )
+
+
+@router.post("/tag_registry/{tag_ref}/revoke", response_model=ActionResult)
+def revoke_tag_association(tag_ref: str, payload: RevokeAssociationPayload) -> ActionResult:
+    """撤销一个来源的标签关联凭据，保留其余来源的覆盖。"""
+    service = require_tag_service()
+    result = service.revoke_association(
+        tag_ref,
+        asset_code=payload.asset_code,
+        source=payload.source,
+        credential=payload.credential,
+        evidence_id=payload.evidence_id,
+    )
+    if not result.get("ok"):
+        return ActionResult(ok=False, message=result.get("error", "撤销失败"), result=result)
+    return ActionResult(
+        ok=True, message=f"已撤销{result['revoked_count']}条关联凭据", result=result)
+
+
+@router.post("/tag_registry/{tag_ref}/confirm", response_model=ActionResult)
+def confirm_tag_association(tag_ref: str, payload: EntryPayload) -> ActionResult:
+    """确认关联凭据，标签引用兼容历史标签编号。"""
+    service = require_tag_service()
+    values = payload.values or {}
+    result = service.confirm_association(
+        tag_ref,
+        asset_code=values.get("资产编号") or values.get("asset_code"),
+        source=values.get("来源") or values.get("source"),
+        evidence_id=values.get("凭据编号") or values.get("evidence_id"),
+    )
+    if not result.get("ok"):
+        return ActionResult(ok=False, message=result.get("error", "确认失败"), result=result)
+    return ActionResult(
+        ok=True, message=f"已确认{result['confirmed_count']}条关联凭据", result=result)
+
+
+@router.get("/tag_registry/{tag_ref}/coverage", response_model=dict)
+def tag_coverage_detail(tag_ref: str) -> dict[str, Any]:
+    """覆盖明细：资产覆盖集合 + 每个资产背后的来源凭据。"""
+    service = require_tag_service()
+    result = service.get_coverage_detail(tag_ref)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("error", "标签不存在"))
+    return result
+
+
+@router.get("/tag_registry/{tag_ref}/coverage-count", response_model=dict)
+def tag_coverage_count(tag_ref: str) -> dict[str, Any]:
+    service = require_tag_service()
+    assets = service.get_coverage_assets(tag_ref)
+    return {"标签": tag_ref, "覆盖资产数": len(assets), "覆盖资产集合": assets}

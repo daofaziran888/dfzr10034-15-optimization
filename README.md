@@ -64,6 +64,8 @@ npm run dev
 | 血缘追踪 | `lineage_track` | 血缘关系 | 关系编号、上游资产、下游资产 |
 | 影响分析 | `impact_analysis` | 影响报告 | 报告编号、变更资产、影响下游 |
 | 标签体系 | `tag_registry` | 业务标签 | 标签编号、标签名称、标签层级 |
+| 关联凭据 | `tag_association` | 关联凭据 | 凭据编号、标签编号、资产编号、来源、关联状态 |
+| 覆盖明细 | `tag_coverage` | 标签覆盖 | 覆盖编号、标签编号、资产编号、状态、确认凭据数 |
 | 治理评分 | `govern_score` | 评分任务 | 任务编号、评估对象、评分维度 |
 | 数据契约 | `data_contract` | 契约定义 | 契约编号、数据资产、Schema约束 |
 | 合规扫描 | `compliance_scan` | 扫描任务 | 任务编号、目标资产、合规条款 |
@@ -80,6 +82,32 @@ npm run dev
   `frontend/src/domain/<模块>.ts`，用于承载真实业务差异并维持36题位容量。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+
+### 标签覆盖口径
+
+标签关联分「凭据」与「覆盖」两层：`tag_association` 记录每个来源的提交凭据，
+`tag_coverage` 按「标签 + 资产身份」归并，同一张表在一个标签下只有一条覆盖。
+
+- **去重**：同一来源重复提交只保留一份凭据；同一批次内重复的资产只算一次覆盖。
+- **多来源**：不同来源支持同一张表时各自保留凭据，覆盖仍只算一次。
+- **合并**：合并标签时覆盖按资产身份取并集，交集资产不会重复计数；源标签保留为
+  历史编号，之后用旧标签编号或旧名称提交关联仍落到合并后的目标标签。
+- **撤销**：可按资产 + 来源撤销单个凭据；只要还有其他已确认凭据，覆盖保持生效。
+- **追溯**：`GET /api/tag_registry/{标签}/coverage` 返回覆盖明细与来源凭据，
+  覆盖记录的 `首次确认凭据` / `首次确认时间` 回答「哪一次确认后取得覆盖」。
+- **评分**：治理评分的「标签覆盖」维度按覆盖并集计算，`标签覆盖变化` 后可用
+  `recompute_after_tag_change()` 重算汇总。
+
+相关接口：
+
+```text
+POST /api/tag_registry/batch-associate        批量关联（records 或 tag_id + assets）
+POST /api/tag_registry/merge                  合并标签（source_id / target_id）
+POST /api/tag_registry/{标签}/confirm         确认关联（兼容历史标签编号）
+POST /api/tag_registry/{标签}/revoke          撤销某个来源的凭据
+GET  /api/tag_registry/{标签}/coverage        覆盖明细
+GET  /api/tag_registry/{标签}/coverage-count  覆盖集合与数量
+```
 
 领域：数据工程
 子方向：数仓与数据湖

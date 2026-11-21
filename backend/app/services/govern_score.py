@@ -8,7 +8,10 @@ import time as _time
 from typing import Any
 
 from app.services.base import BaseModuleService
+from app.services.tag_registry import TagRegistryService, asset_identity
 from app.store import store
+
+tag_registry_service = TagRegistryService()
 
 
 class GovernScoreService(BaseModuleService):
@@ -61,11 +64,10 @@ class GovernScoreService(BaseModuleService):
         lineage_score = min(100, len(lineage) * 25)
         dimensions["血缘完备性"] = lineage_score
 
-        # 标签覆盖
-        tag_assets = []
-        for t in store.rows("tag_registry"):
-            tag_assets.append(t.get("关联资产数", "0"))
-        dimensions["标签覆盖"] = min(100, 50 + len(tag_assets) * 5)
+        # 标签覆盖：按资产身份取覆盖并集，同一张表只算一次，不累加各标签计数。
+        cov = tag_registry_service.asset_coverage(asset_code)
+        covered_by = cov["tag_codes"]
+        dimensions["标签覆盖"] = 100 if cov["covered"] else self.SCORE_DIMENSIONS["标签覆盖"]["base"]
 
         # 契约合规
         contracts = store.find_by_field("data_contract", "数据资产", asset_code)
@@ -102,6 +104,8 @@ class GovernScoreService(BaseModuleService):
             "pending": overall < 60,
             "abnormal": overall < 40,
             "dimensions": dimensions,
+            "标签覆盖": dimensions["标签覆盖"],
+            "covered_by": covered_by,
             "created_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         store.rows(self.MODULE).append(score_entry)
@@ -118,8 +122,33 @@ class GovernScoreService(BaseModuleService):
             "asset": asset_code,
             "overall": overall,
             "dimensions": dimensions,
+            "标签覆盖": dimensions["标签覆盖"],
+            "covered_by": covered_by,
             "pipeline": "lineage_track->impact_analysis->govern_score",
         }
+
+    def recompute_after_tag_change(self, asset_codes: list[str] | None = None) -> dict[str, Any]:
+        """标签覆盖变化后重算受影响资产的评分（评分汇总跟随并集更新）。
+
+        ``asset_codes`` 为空时重算所有出现过标签覆盖的资产。
+        """
+        targets = {
+            asset_identity(code) for code in (asset_codes or []) if asset_identity(code)
+        }
+        if not targets:
+            targets = {
+                row.get("资产编号", "")
+                for row in store.rows("tag_coverage")
+                if row.get("资产编号") and row.get("状态") == "生效"
+            }
+        results = [self.evaluate_asset(code) for code in sorted(targets)]
+        return {
+            "recomputed": len(results),
+            "assets": [item["asset"] for item in results],
+            "results": results,
+        }
+
+    recompute_scores_for_tags = recompute_after_tag_change
 
     def _compute_baseline(self, dims: dict[str, int], overall: float) -> str:
         """计算改进基线。"""

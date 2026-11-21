@@ -16,6 +16,8 @@ from app.services.change_capture import ChangeCaptureService
 from app.services.lineage_track import LineageTrackService
 from app.services.impact_analysis import ImpactAnalysisService
 from app.services.tag_registry import TagRegistryService
+from app.services.tag_association import TagAssociationService
+from app.services.tag_coverage import TagCoverageService
 from app.services.govern_score import GovernScoreService
 from app.services.data_contract import DataContractService
 from app.services.compliance_scan import ComplianceScanService
@@ -45,6 +47,8 @@ SERVICES: dict[str, BaseModuleService] = {
     "lineage_track": LineageTrackService(),
     "impact_analysis": ImpactAnalysisService(),
     "tag_registry": TagRegistryService(),
+    "tag_association": TagAssociationService(),
+    "tag_coverage": TagCoverageService(),
     "govern_score": GovernScoreService(),
     "data_contract": DataContractService(),
     "compliance_scan": COMPLIANCE_SERVICE,

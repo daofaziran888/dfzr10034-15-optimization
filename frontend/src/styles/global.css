@@ -38,6 +38,7 @@ body { margin: 0; background: #f6f8fb; color: #1f2937; }
 .create-field { display: block; margin-bottom: 10px; }
 .create-field span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
 .create-field input { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.create-field .batch-textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-family: inherit; resize: vertical; }
 /* DAG 拓扑图 */
 .dag-wrap { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: #fff; min-height: 320px; user-select: none; }
 .dag-svg { width: 100%; height: 100%; }
